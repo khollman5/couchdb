@@ -1,0 +1,142 @@
+
+cd /mnt/khsw/cdb
+yum install -y couchbase-server-enterprise-7.0.0-beta-oel7.x86_64.rpm
+
+# Enable max procs:
+https://docs.couchbase.com/server/7.0/install/rhel-suse-install-intro.html
+
+cd /etc/security/limits.d
+vi 91-couchbase.conf
+couchbase soft nproc 4096
+couchbase hard nproc 16384
+
+
+# Disable huge pages
+https://docs.couchbase.com/server/7.0/install/thp-disable.html
+	vi /etc/init.d/disable-thp
+#!/bin/bash
+### BEGIN INIT INFO
+# Provides:          disable-thp
+# Required-Start:    $local_fs
+# Required-Stop:
+# X-Start-Before:    couchbase-server
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Disable THP
+# Description:       Disables transparent huge pages (THP) on boot, to improve
+#                    Couchbase performance.
+### END INIT INFO
+
+case $1 in
+  start)
+    if [ -d /sys/kernel/mm/transparent_hugepage ]; then
+      thp_path=/sys/kernel/mm/transparent_hugepage
+    elif [ -d /sys/kernel/mm/redhat_transparent_hugepage ]; then
+      thp_path=/sys/kernel/mm/redhat_transparent_hugepage
+    else
+      return 0
+    fi
+
+    echo 'never' > ${thp_path}/enabled
+    echo 'never' > ${thp_path}/defrag
+
+    re='^[0-1]+$'
+    if [[ $(cat ${thp_path}/khugepaged/defrag) =~ $re ]]
+    then
+      # RHEL 7
+      echo 0  > ${thp_path}/khugepaged/defrag
+    else
+      # RHEL 6
+      echo 'no' > ${thp_path}/khugepaged/defrag
+    fi
+
+    unset re
+    unset thp_path
+    ;;
+esac
+
+sudo chmod 755 /etc/init.d/disable-thp
+sudo chkconfig --add disable-thp
+
+# Ensure Huge pages won't be used:
+sudo mkdir /etc/tuned/no-thp
+vi /etc/tuned/no-thp/tuned.conf
+[main]
+include=virtual-guest
+
+[vm]
+transparent_hugepages=never
+
+# Activate:
+sudo tuned-adm profile no-thp
+
+# confirm it has all been applied:
+cat /sys/kernel/mm/transparent_hugepage/enabled
+cat /sys/kernel/mm/transparent_hugepage/defrag
+
+
+# Set swappiness
+https://docs.couchbase.com/server/7.0/install/install-swap-space.html
+cat /proc/sys/vm/swappiness
+sudo sh -c 'echo 1 > /proc/sys/vm/swappiness'
+sudo cp -p /etc/sysctl.conf /etc/sysctl.conf.`date +%Y%m%d-%H:%M`
+sudo sh -c 'echo "" >> /etc/sysctl.conf'
+sudo sh -c 'echo "#Set swappiness to 1 to avoid swapping" >> /etc/sysctl.conf'
+sudo sh -c 'echo "vm.swappiness = 1" >> /etc/sysctl.conf'
+
+sudo systemctl enable couchbase-server
+sudo systemctl start couchbase-server
+sudo systemctl stop couchbase-server
+
+
+
+Ports:
+
+4369,8091-8097,18091-18097,9100-9140,19130,9998,9999,11207-11210,21100,21150,21200,21250,21300,21350
+
+OLinux:
+firewall-cmd --zone=public --add-port=4369/tcp --permanent
+firewall-cmd --zone=public --add-port=4369/tcp
+firewall-cmd --zone=public --add-port=8091-8097/tcp --permanent
+firewall-cmd --zone=public --add-port=8091-8097/tcp
+firewall-cmd --zone=public --add-port=18091-18097/tcp --permanent
+firewall-cmd --zone=public --add-port=18091-18097/tcp
+firewall-cmd --zone=public --add-port=9100-9140/tcp --permanent
+firewall-cmd --zone=public --add-port=9100-9140/tcp
+firewall-cmd --zone=public --add-port=19130/tcp --permanent
+firewall-cmd --zone=public --add-port=19130/tcp
+firewall-cmd --zone=public --add-port=9998-9999/tcp --permanent
+firewall-cmd --zone=public --add-port=9998-9999/tcp
+firewall-cmd --zone=public --add-port=11207-11210/tcp --permanent
+firewall-cmd --zone=public --add-port=11207-11210/tcp
+firewall-cmd --zone=public --add-port=21100/tcp --permanent
+firewall-cmd --zone=public --add-port=21100/tcp
+firewall-cmd --zone=public --add-port=21150/tcp --permanent
+firewall-cmd --zone=public --add-port=21150/tcp
+firewall-cmd --zone=public --add-port=21200/tcp --permanent
+firewall-cmd --zone=public --add-port=21200/tcp
+firewall-cmd --zone=public --add-port=21250/tcp --permanent
+firewall-cmd --zone=public --add-port=21250/tcp
+firewall-cmd --zone=public --add-port=21300/tcp --permanent
+firewall-cmd --zone=public --add-port=21300/tcp
+firewall-cmd --zone=public --add-port=21350/tcp --permanent
+firewall-cmd --zone=public --add-port=21350/tcp
+
+firewall-cmd --zone=public --permanent --list-ports
+
+# Enable Console access:
+curl -u Administrator:Oracle20!8 \
+http://localhost:8091/settings/security \
+-d disableUIOverHttp=true
+
+# Join cluster:
+
+
+
+# cluster
+https://130.61.211.228:18091
+https://130.61.143.24:18091
+
+# Replica
+https://130.61.210.47:18091
+
